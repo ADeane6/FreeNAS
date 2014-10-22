@@ -1,0 +1,1 @@
+My inital FreeNAS setup doc and config, More to follow

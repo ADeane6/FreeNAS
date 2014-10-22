@@ -1,0 +1,194 @@
+FreeNAS Prep
+1. SAS IT Flash 
+	To flash the LSI 2308 into IT mode I used the following firmware:
+	ftp://ftp.supermicro.com/Driver/SAS/LSI/2308/Firmware/IT/
+
+	First you need to get the LSI SAS address.
+	Restart the board; when you see the LSI prompt: "LSI Corporation ... "
+	Press Control-C on the keyboard (I did it all via IPMI), press Ctrl-C successively until you see "starting configuration utility" because it's quite easy to miss
+
+	Once you're in there, press Enter this will show the SAS address
+	it looks like:
+
+	500304800:70a8b00
+
+	You need the last 9 digits: so here that would be: 0070a8b00
+
+	The DOS instructions do *NOT* work on this board, you must use the UEFI method.
+	I disconnected all the disks connected to the LSI out of habit for any flashing. Not sure that's required, but I did it just to be safe.
+
+	Format a USB stick in FAT32; copy the content of the UEFI folder unto it
+	The restart the X10SL7-F, press F11 when prompted and select the built-in UEFI option.
+
+	Once you're on the UEFI prompt, mount the disk. The list of available disk volume will be shown on the screen:
+	for me it was fs1, so mount it:
+
+		mount fs1:
+
+	Then I selected that device:
+
+		fs1:
+
+	follow the instruction in the SMC2308IT_FW_Flash_Instruction_091012 file:
+
+	run SMC2308T.nsh (if you've copied the UEFI folder and not its content from the archive above, do
+
+		cd UEFI
+
+	first)
+
+		SMC2308T.nsh
+
+	The goes on for a little while, and right at the end you're prompted for the 9 digits, enter them and press ENTER.
+
+	Reboot... that's it... the card is in IT mode now.
+	----
+
+	XHCI had to be disabled otherwise FreeNAS wouldn't boot, it refused to mount the root partition, this is done in the BIOS:
+	Advanced -> PCH-IO Configuration. XHCI Mode has to be set to Disabled
+
+	Note to anyone: Do *NOT* enable the watchdog, that only makes your machine reboot after 5 minutes, I had set it without realising and I thought I had a faulty boards for a short while...
+
+FreeNAS Setup
+1. Install
+	-Download latest image
+	-Extract img and burn to usb using Win32DiskImager
+	-Put USB into Server and boot from USB
+	-Everything should load and a IP address should be showen, navigate using any browser to that IP
+	
+2. LAGG setup
+	-Delete all interface configs
+	-Under "Network → Link Aggregations → Create Link Aggregation"
+	-Select LACP and highlight the interefaces you want added to the LAGG, Press OK
+	-highlight the created LAGG and click edit, then go ahead and edit the NEtwork settings for the LAGG
+	-Restart the Server and use the new address to access the GUI
+	
+3. Creating Zpool / adding Vdev
+	-Under Storage → Volumes → ZFS Volume Manager
+	-Choose Volume Name or Volume to expand
+	-Choose your Raid format and Select you disks
+		10x2TB WD REDs
+			Name:		All
+			Encryption:	No
+			Raid:		RaidZ2
+
+4. setting up permissions
+	-select account
+	-lookup groups and users on excel sheet and create them accordingly
+	-apply permissions to datasets according to the excel sheet
+
+5. Create ZFS Dataset
+	-Select exisiting ZFS volume/Dataset → Create ZFS Dataset
+	-Choose Name, Compression Level and Quota
+		See Excel Sheet for Dataset Config
+	
+6. Creating Shares
+	-see excel document for share configs
+	-You have to go to services, CIFS and add the 2 following lines to the Auxiliary Parameters text field:
+	-ea support = no
+	-store dos attributes = no
+	
+7. Settting up email alerts
+	-Under Account → Users → View Users
+	-Click the ChangeE-mail and input details
+		From email: root@freenas.local
+		Outgoing mail server: smtp.gmail.com
+		Port to connect to: 465 (for SSL)
+		TSL/SSL: SSL
+		Use SMTP Authentication: (checked)
+		Username: **************@gmail.com
+		Password: **************
+
+7.1 Creating SMART HDD Email alerts
+	-Once Email is setup SSH in as root
+	-Type the following
+		mount -wu /
+		cd /conf/base/etc
+		ee esmart.sh
+	-Code to put in file
+		{
+			#!/usr/local/bin/sh
+			#
+			# Place this in /conf/base/etc/
+			# Call: sh esmart.sh
+			(
+			echo "To: YourEmail@Address.net"
+			echo "Subject: SMART Drive Results for all drives"
+			echo " "
+			) > /var/cover
+			#HDD 1
+			smartctl -i -H -A -n standby -l error /dev/ada0 >> /var/cover
+			#HDD 2
+			smartctl -i -H -A -n standby -l error /dev/ada1 >> /var/cover
+			#HDD 3
+			smartctl -i -H -A -n standby -l error /dev/ada2 >> /var/cover
+			#HDD 4
+			smartctl -i -H -A -n standby -l error /dev/ada3 >> /var/cover
+			sendmail -t < /var/cover
+			exit 0
+			 
+			# Set idle mode to so it doesn't spin up.
+			# Options -n standby
+			# -i = Device Info
+			# -H = Device Health
+			# -A = Only Vendor specific SMART attributes
+			# -l error = SMART Error Log
+		}
+	-Press ESC and save file
+	-run it to test
+		sh esmart.sh
+	-Write so there on reboot
+		cd /etc
+		cp /conf/base/etc/esmart.sh .
+	-Create the Cron Job
+		User: root
+		Command: sh /etc/esmart.sh
+		Description: HDD SMART Results
+
+7.2 Check temps on fly
+	-ssh in as root
+	-create file etemps.sh
+		ee etemps.sh
+		{
+			#!/usr/local/bin/sh
+			#
+			# Place this in /conf/base/etc/
+			# Call: sh etemps.sh
+			(
+			echo "To: bbbiiittt1198@gmail.com"
+			echo "Subject: SMART Drive Temps for all drives"
+			echo " "
+			echo "CPU temp :"
+			) > /var/cover
+			sysctl -a |egrep -E "cpu\.[0-9]+\.temp" >> /var/cover
+			(
+			echo
+			echo "HDD temp :"
+			) >> /var/cover
+			for i in $(sysctl -n kern.disks)
+			do
+			DevTemp=`smartctl -a /dev/$i | awk '/Temperature_Celsius/{print $0}' | awk '{pri
+			DevSerNum=`smartctl -a /dev/$i | awk '/Serial Number:/{print $0}' | awk '{print
+			DevName=`smartctl -a /dev/$i | awk '/Device Model:/{print $0}' | awk '{print $3}
+			echo $i $DevTemp $DevSerNum $DevName >> /var/cover
+			done
+			sendmail -t < /var/cover
+			exit 0
+		}
+	-run file
+		sh etemps.sh
+	-Write so there on reboot
+		cd /etc
+		cp /conf/base/etc/etemps.sh .
+	-Create the Cron Job
+		User: root
+		Command: sh /etc/etemps.sh
+		Description: HDD Temps
+
+
+8. Move Data
+	-Moving all data on to NAS
+	-Must be sturctured beforehand		
+		See Sample folder for structure and layout
+		
+10. Backups/Resync

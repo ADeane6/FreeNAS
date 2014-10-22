@@ -1,0 +1,54 @@
+FreeNAS Permissions for Jails
+
+-Repo: http://download.freenas.org/plugins/9/x64/pbi-meta/pbi-repo.rpo
+
+*Important*
+Replicate the permissions setup inside an outside the jail
+**********
+
+-Setting up download/Watch directories for Transmission
+	1) Once the plugin is installed create a user named transmission(ID: 921) the group will automatically be created
+	2) Add the user to whatever "group" has permission for the download/Watch folder
+	3) Mount the download/Watch folder to the jail
+	4) add the group of the folder to the jail groups 
+		ee /etc/group
+		Append to end of file: "group":*:"GID":transmission
+	5) Go to the mount point inside the jail and check the permissions on the folders
+		its should be root:"group" with rwxrwxr-x if it isn't run this
+			chown root:"group" "folder"
+	6) Shutdown the plugin (not the jail) go to /usr/pbi/transmission-amd64/etc/transmission/home/
+		ee settings.json
+		change "umask": 18, -> "umask": 2,
+	7) Restart the plugin and throw a .torrent file into the watch directory transmission should auto load it and start downloading
+	
+-Setting up folders for plex
+	1) Once the plugin is installed create a user named plex(ID: 972) the group will automatically be created
+	2) Add the plex user to whatever "group" has permission for the download/Watch folder
+	3) Mount the download/Watch folder to the jail
+	4) add the group of the folder to the jail groups 
+		ee /etc/group
+		Append to end of file: "group":*:"GID":plex
+	5) Go to the mount point inside the jail and check the permissions on the folders
+		its should be root:"group" with rwxrwxr-x if it isn't run this
+			chown root:"group" "folder"
+	6) Restart Plex and setup from the plex webpage
+		
+-Setting up Sickbeard T edition
+    service sickbeard stop
+    pkg install git nginx python
+    ls -l /usr/pbi/sickbeard-amd64/share/sickbeard/Sick-Beard
+    Record Permissions
+    rm -r /usr/pbi/sickbeard-amd64/share/sickbeard/Sick-Beard
+    git clone https://github.com/danielthor/sickbeard-orange.git /usr/pbi/sickbeard-amd64/share/sickbeard/Sick-Beard
+    Set permissions recorded using chown
+    service sickbeard start
+
+Plex Update
+	1. Login with SSH to your FreeNAS (or alternatively go to shell in WebGUI)
+	2. type: 'jls' (without ' ' ) and take the note of the # of jail of your Plex installation
+	3. type: 'jexec # csh' (where # is the number of the jail noted in last step)
+	4. type: 'fetch -o PMS_Updater.sh https://raw.githubusercontent.com/mstinaff/PMS_Updater/master/PMS_Updater.sh'
+	5. type: 'chmod 755 PMS_Updater.sh'
+	6. type: './PMS_Updater.sh -u PlexPass_User -p PlexPass_password -a'
+
+	after that you'll be updated to the latest PlexPass version. To update again you do steps 1,2,3 and 6
